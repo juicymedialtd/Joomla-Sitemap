@@ -13,7 +13,7 @@ Features
 Component Usage
 -------
 To use this component:
-* download this site
+* download the source files using the "downloads" button at the top of this site, make sure to choose ZIP
 * simply install the supplied ZIP file using the Joomla admin area
 * after successful installation, create a menu link to the component, selecting the default view.
 * Google sitemap generation is presently done by creating a menu link as above and then on the frontend visiting the link.
@@ -41,10 +41,10 @@ CHANGE LOG
 -------
 Here is a list of known changes, including those from various contributors. Specfically this list covers items that were implemented pre SVN and GIT implementation.
 
-06/07/2011 - Added to GIT
-08/06/2011 - Fixed enable/disable menus for google XML (thanks to Hugh Saunders)
-09/02/2010 - Recent Joomla update caused infinite loop issue
-21/06/2009 - General tidy-up and bug fixes
-22/07/2008 - Fixed database prefix issue
-07/08/2008 - Fixed date and priority issue
-07/11/2008 - Removed all PHP short code tags
+* 06/07/2011 - Added to GIT
+* 08/06/2011 - Fixed enable/disable menus for google XML (thanks to Hugh Saunders)
+* 09/02/2010 - Recent Joomla update caused infinite loop issue
+* 21/06/2009 - General tidy-up and bug fixes
+* 22/07/2008 - Fixed database prefix issue
+* 07/08/2008 - Fixed date and priority issue
+* 07/11/2008 - Removed all PHP short code tags
