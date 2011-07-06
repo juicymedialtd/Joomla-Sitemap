@@ -11,14 +11,23 @@
  * of works licensed under the GNU General Public License or other free or open
  * source software licenses. See COPYRIGHT.php for copyright notices and
  * details.
+ *
+ * + Initial construction Peter Davies, 10 June 2008
+ * + Sitemap integration and extract Michael Oldroyd, 11 June 2008
+ * + Multiple Menu and External Link Support Michael Oldroyd, 13 June 2008
+ * + Article 'lastmod' Date extraction and 'changefreq' conversion, 16 June 2008
  */
 
 // no direct access
 defined( '_JEXEC' ) or die( 'Restricted access' );
-
 jimport('joomla.application.component.view');
 jimport('joomla.base.tree');
 jimport('joomla.utilities.simplexml');
+
+define('CURL_READY',0);
+define('CURL_BLOCKED',1);
+define('CURL_UNAVAILABLE',2);
+
 
 /**
  * This is the main JM Sitemap class. Its designed to get the menu listing,
@@ -26,18 +35,56 @@ jimport('joomla.utilities.simplexml');
  * Joomla functionality.
  *
  */
-class SitemapViewSitemap extends JView {
+class SitemapViewGooglemap extends JView {
 	/**
-	 * Display the default.php file in the sitemap/tmpl directory
+	 * Ouput XML sitemap
 	 *
 	 * @param string $tpl
 	 */
-	function display($tpl = null){
+	function display($tpl = null){		
+		// tell the browser
+		header('Content-type: application/xml');
+		$menu_data = '<?xml version="1.0" encoding="UTF-8"?>'."\n";
+
 		// get menu items
-		$menu_data = $this->getAllMenuData();
+		$menu_data .= $this->getAllMenuData();
 		$this->set('menu_data', $menu_data);
 
-		parent::display($tpl);
+		// send to the file
+		$this->saveData($menu_data);
+
+		// submit the sitemap to search engines after writing it
+		//print_r($this->submitSitemap());
+
+		// send to the screen
+		echo $menu_data;
+
+		// we need to exit here so that
+		// the Joomla template does not load
+		exit();
+	}
+
+	/**
+	 * Save XML data
+	 *
+	 * @param string $data
+	 */
+	function saveData($data){
+		$path = JPATH_SITE.DS;
+		JPath::check( $path );
+		$out = fopen($path."sitemap.xml", "w");
+		fwrite($out, $data);
+		fclose($out);
+	}
+
+	/**
+	 * Submits the xml sitemap location
+	 *
+	 * @return array The results of the submission
+	 */
+	function submitSitemap() {
+		$sitemap = new SubmitSitemap();
+		return $sitemap->curlTest();
 	}
 
 	/**
@@ -53,12 +100,10 @@ class SitemapViewSitemap extends JView {
 		$menus = $this->getMenuList();
 		$menu_str = "";
 		foreach ($menus as $menu_item) {
-			// set the title of the menu as Header 1
-			$menu_str .= "<h1>".$menu_item['title']."</h1>";
 			// get the XML listing for a given menu type
-			$menu_str .= $this->render('jmSitemapXMLCallback',$menu_item['menutype']);
+			$menu_str .= $this->render('jmGooglemapXMLCallback',$menu_item['menutype']);
 		}
-		return $menu_str;
+		return $this->processToXML($menu_str);
 	}
 
 	/**
@@ -68,12 +113,7 @@ class SitemapViewSitemap extends JView {
 	 */
 	function getMenuList(){
 		$db =& JFactory::getDBO();
-		
 		$query = 'SELECT m.menutype, m.title, jm.ordering FROM #__menu_types AS m, #__jmsitemap_menus as jm where jm.id = m.id and jm.published=1 order by jm.ordering asc';
-		
-		//$query = 'SELECT m.menutype, m.title' .
-				//' FROM #__menu_types AS m';
-				//' ORDER BY m.menutype';
 		$db->setQuery( $query );
 
 		// load all rows as associative list
@@ -87,7 +127,7 @@ class SitemapViewSitemap extends JView {
 	 * @return string
 	 */
 	function buildXML($menu_name = "mainmenu"){
-		$menu = new JSitemapTree();
+		$menu = new JGooglemapTree();
 		$items = &JSite::getMenu();
 
 		// Get Menu Items
@@ -183,6 +223,34 @@ class SitemapViewSitemap extends JView {
 	}
 
 	/**
+	 * Processes the XML string to remove placeholder parent elements
+	 *
+	 * @param unknown_type $xmlString
+	 */
+	function processToXML($xmlString) {
+
+		//Strip out the placeholder root elements
+		$rules = array(
+			'/<root>\\n/',
+			'/<\/root>/'
+		);
+		$xmlString = preg_replace($rules,'',$xmlString);
+
+		// validate against a bunch of schemas
+		$xml = '<urlset xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"'."\n";
+        $xml .= ' xsi:schemaLocation="http://www.sitemaps.org/schemas/sitemap/0.9"'."\n";
+        //$xml .= ' url="http://www.sitemaps.org/schemas/sitemap/0.9/sitemap.xsd"'."\n";
+        $xml .= ' xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">';
+
+        $xml .= $xmlString;
+
+        //Add closing element
+        $xml .= '</urlset>';
+
+        return $xml;
+	}
+
+	/**
 	 * Create the UL for the menu adding ID's & class
 	 *
 	 * @param string $callback
@@ -191,12 +259,8 @@ class SitemapViewSitemap extends JView {
 	 */
 	function render($callback, $menu_name="mainmenu"){
 		// include the menu class
-		$xml = SitemapViewSitemap::getXML($menu_name, $callback);
+		$xml = SitemapViewGooglemap::getXML($menu_name, $callback);
 		if ($xml) {
-			// add attributes
-			$xml->addAttribute('class', $menu_name.'_class');	// for CSS
-			$xml->addAttribute('id', $menu_name.'_menu');	    // for JS if req.
-
 			// show white space?
 			$show_whitespace = true;
 			return JFilterOutput::ampReplace($xml->toString((bool)$show_whitespace));
@@ -206,85 +270,150 @@ class SitemapViewSitemap extends JView {
 	/**
 	 * This generates the XML list of menu items
 	 *
-	 * @param JSitemapMenuNode $node
+	 * @param JGooglemapMenuNode $node
 	 * @param Array $args
 	 */
-	function jmSitemapXMLCallback(&$node, $args){
+	function jmGooglemapXMLCallback(&$node, $args){
 		$user	= &JFactory::getUser();
 		$menu	= &JSite::getMenu();
 		$active	= $menu->getActive();
 		$path	= isset($active) ? array_reverse($active->tree) : null;
-
-		if (($args['end']) && ($node->attributes('level') >= $args['end'])) {
-			$children = &$node->children();
-			foreach ($node->children() as $child)
-			{
-				if ($child->name() == 'ul') {
-					$node->removeChild($child);
-				}
-			}
-		}
-
-		if ($node->name() == 'ul') {
-			foreach ($node->children() as $child)
-			{
-				if ($child->attributes('access') > $user->get('aid', 0)) {
-					$node->removeChild($child);
-				}
-			}
-		}
-
-		if (($node->name() == 'li') && isset($node->ul)) {
-			$node->addAttribute('class', 'parent');
-		}
-
-		if (isset($path) && in_array($node->attributes('id'), $path)){
-			if ($node->attributes('class')) {
-				$node->addAttribute('class', $node->attributes('class').' active');
-			} else {
-				$node->addAttribute('class', 'active');
-			}
-		} else {
-			if (isset($args['children']) && !$args['children'])
-			{
-				$children = $node->children();
-				foreach ($node->children() as $child)
-				{
-					if ($child->name() == 'ul') {
-						$node->removeChild($child);
-					}
-				}
-			}
-		}
-
-		if (($node->name() == 'li') && ($id = $node->attributes('id'))) {
-			if ($node->attributes('class')) {
-				$node->addAttribute('class', $node->attributes('class').' item'.$id);
-			} else {
-				$node->addAttribute('class', 'item'.$id);
-			}
-		}
-
-		if (isset($path) && $node->attributes('id') == $path[0]) {
-			$node->addAttribute('id', 'current');
-		} else {
-			$node->removeAttribute('id');
-		}
-		$node->removeAttribute('level');
-		$node->removeAttribute('access');
 	}
 }
 
+/**
+ * Handles submission of the sitemap in a RESTful manner,
+ * using curl
+ *
+ * @todo Add list of search engine URLs
+ * @todo Check curl can communicate with external servers
+ * @todo Allow custom configuration of curl using administrator front-end
+ */
+class SubmitSitemap {
+	/**
+	 * The vars to pass to the search engine
+	 *
+	 * @var string
+	 */
+	var $_submitURI;
 
+	/**
+	 * Whether the current envionment has curl
+	 * support
+	 *
+	 * @var bool
+	 */
+	var $_curlAvailable;
+
+	/**
+	 * The list of available search engines to submit
+	 *
+	 * @var array
+	 */
+	var $_availableEngines;
+
+	/**
+	 * Initialises the submit URI, checks for curl, and defines
+	 * the list of search engines to submit to
+	 *
+	 * @todo Get list of available search engines from a database
+	 * table (Allowing users to add and remove engines they want to
+	 * submit to)
+	 */
+	function __construct() {
+		$this->curlTest;
+
+		if ($this->_curlAvailable === CURL_READY) {
+			$this->_submitURI = urlencode("/ping?sitemap=http://"
+								.$_SERVER['SERVER_NAME'].
+								"/sitemap.xml");
+
+			$this->_availableEngines = array (
+				array('loc'=>'google.com'),
+				array('loc'=>'live.com')
+			);
+		}
+	}
+
+	/**
+	 * A Decent way to test that curl is available
+	 * and correctly configured. Detects whether curl
+	 * is installed then attempts to get a response
+	 * from the google.com servers
+	 *
+	 * @todo What to do if curl doesn't work
+	 */
+	function curlTest() {
+		//Detect if curl is installed
+		$this->_curlAvailable = (function_exists('curl_init'))
+			? CURL_BLOCKED : CURL_UNAVAILABLE;
+
+		if ($this->_curlAvailable === CURL_BLOCKED) {
+			//Set up the test connection
+			$testConn = curl_init('http://www.google.com');
+
+			//Transmission Options
+			curl_setopt($testConn, CURLOPT_HEADER, 1);
+			curl_setopt($testConn, CURLOPT_RETURNTRANSFER, 1);
+			curl_setopt($testConn, CURLOPT_TIMEOUT, 60);
+
+			//Execute the connection
+			$result[data] = curl_exec($testConn);
+
+			//Get the transmission information
+			$result[info] = curl_getinfo($testConn);
+			$result[error] = curl_error($testConn);
+			//print_r($result);
+			//Close the connection
+			curl_close($testConn);
+
+			//Check for connection success
+			return $result;
+			if (false) $this->_curlAvailable = CURL_READY;
+			else {
+
+			}
+		}
+	}
+
+	/**
+	 * Handles submitting the site to each of the search engines
+	 * specified.
+	 *
+	 */
+	function submit() {
+		if ($this->_curlAvailable === CURL_READY) {
+			$connections = array();
+			for ($i=0;$i<count($this->_availableEngines);$i++) {
+				$engine = $this->_availableEngines[$i];
+				$loc = 'http://www.'.$engine[loc].$this->_submitURI;
+				$connection[$i] = curl_init($loc);
+				curl_setopt($connection[$i], CURLOPT_HEADER, 1);
+				curl_setopt($connection[$i], CURLOPT_RETURNTRANSFER, 1);
+				curl_setopt($connection[$i], CURLOPT_TIMEOUT, 5);
+			}
+
+			for ($i=0;$i<count($connection);$i++) {
+				$engine = & $this->_availableEngines[$i];
+				$engine[data] = curl_exec($connection[$i]);
+				$engine[result] = curl_getinfo($connection[$i]);
+				$engine[error] = curl_error($connection[$i]);
+				curl_close($connection[$i]);
+			}
+
+			return $this->_availableEngines;
+		}
+	}
+}
 
 /**
- * JM Sitemap Tree Class.
+ * JM Googlemap Tree Class.
  *
  * @author		Louis Landry, modified by Peter Davies
  * @package		JM Sitemap
  * @since		1.5
  */
-class JSitemapTree extends JTree {
+class JGooglemapTree extends JTree {
 	/**
 	 * Node/Id Hash for quickly handling node additions to the tree.
 	 */
@@ -301,7 +430,7 @@ class JSitemapTree extends JTree {
 	var $_buffer = null;
 
 	function __construct(){
-		$this->_root		= new JSitemapMenuNode(0, 'ROOT');
+		$this->_root		= new JGooglemapMenuNode(0, 'ROOT');
 		$this->_nodeHash[0]	=& $this->_root;
 		$this->_current		=& $this->_root;
 	}
@@ -311,7 +440,7 @@ class JSitemapTree extends JTree {
 		$data = $this->_getItemData($item);
 
 		// Create the node and add it
-		$node = new JSitemapMenuNode($item->id, $item->name, $item->access, $data);
+		$node = new JGooglemapMenuNode($item->id, $item->name, $item->access, $data);
 
 		if (isset($item->mid)) {
 			$nid = $item->mid;
@@ -319,7 +448,9 @@ class JSitemapTree extends JTree {
 			$nid = $item->id;
 		}
 		$this->_nodeHash[$nid] =& $node;
-		$this->_current =& $this->_nodeHash[$item->parent];
+
+		//Messy way to remove the nested menu items
+		$this->_current =& $this->_nodeHash[0];
 
 		if ($this->_current) {
 			$this->addChild($node, true);
@@ -328,22 +459,96 @@ class JSitemapTree extends JTree {
 			JError::raiseError( 500, 'Orphan Error. Could not find parent for Item '.$item->id );
 		}
 	}
+	/**
+	 * Gets details relating to the articles which are
+	 * linked through the menu, currently the creation
+	 * and modification timestamps of the articles
+	 *
+	 * @param unknown_type $artid
+	 * @return unknown
+	 */
+	function getArticleInfo($artid) {
+		$db =& JFactory::getDBO();
+
+		$comID = <<<QRY
+SELECT
+	UNIX_TIMESTAMP(C.created) AS 'created',
+	UNIX_TIMESTAMP(C.modified) AS 'modified'
+FROM
+	#__content AS C
+WHERE
+	C.id = $artid;
+QRY;
+		$db->setQuery( $comID );
+
+		$result = $db->loadAssocList();
+
+		return $result;
+	}
+
+function getPriorityLevel($artid)
+{
+	$db =& JFactory::getDBO();
+
+	$query = "Select priority from #__jmsitemap_google where id=$artid";
+	$db->setQuery($query);
+	$result =& $db->loadResultArray();
+
+	//print_r($result);
+
+	return $result;
+}
+
+	/**
+	 * Checks the difference between the date of the creation/modification
+	 * of an article, and returns an approximate string value for the
+	 * sitemap change frequency directive.
+	 *
+	 * @param int $modDate The creation/modification timestamp
+	 * @return string The change frequency title determined
+	 */
+	function checkChangeFreq ($modDate) {
+		$changeFreqs = array(
+			-1=>"never",0=>"always",3600=>"hourly",
+    		86400=>"daily",604800=>"weekly",
+    		2419200=>"monthly",29030400=>"yearly"
+		);
+
+		$date = time();
+
+		$difference = $date - $modDate;
+		if (!is_null($modDate)) {
+			foreach ($changeFreqs as $stamp => $title) {
+				if ($difference <= $stamp)
+					$change = $title;
+				else if ($title = 'yearly' AND $difference > $stamp)
+					$change = $changeFreqs[-1];
+			}
+			if (!isset($change)) $change = $changeFreqs[0];
+		} else {
+			$change = $changeFreqs[0];
+		}
+		return $change;
+	}
 
 	function toXML(){
 		// Initialize variables
 		$this->_current =& $this->_root;
 
+		$this->_buffer = "<root>\n";
+
 		// Recurse through children if they exist
 		while ($this->_current->hasChildren()){
-			$this->_buffer .= '<ul>';
 			foreach ($this->_current->getChildren() as $child)
 			{
 				$this->_current = & $child;
 				$this->_getLevelXML(0);
 			}
-			$this->_buffer .= '</ul>';
 		}
-		if($this->_buffer == '') { $this->_buffer = '<ul />'; }
+		if($this->_buffer == '') { $this->_buffer = "\t<url />\n"; }
+
+		$this->_buffer .= "</root>";
+
 		return $this->_buffer;
 	}
 
@@ -351,24 +556,61 @@ class JSitemapTree extends JTree {
 		$depth++;
 
 		// Start the item
-		$this->_buffer .= '<li access="'.$this->_current->access.'" level="'.$depth.'" id="'.$this->_current->id.'">';
+		$this->_buffer .= "\t<url>\n";
 
-		// Append item data
-		$this->_buffer .= $this->_current->link;
+		// Detect internal and external links using regex
+		$result = preg_match('/^http:\/\//',$this->_current->link);
+
+		//Set the link string, and accommodate external links
+		$link = ($result > 0) ?
+			$this->_current->link :
+			"http://".$_SERVER['SERVER_NAME'].$this->_current->link;
+
+		//Add the link
+		$this->_buffer .= "\t<loc>".$link."</loc>\n";
+
+		//Get information from articles
+		$lastMod = $this->getArticleInfo($this->_current->id);
+
+		//Set up the modification date
+		$this->_buffer .= "\t<lastmod>";
+		$this->_buffer .= (count($lastMod) > 0)
+			?(
+				($lastMod[0]['modified'] > 0)
+					? date('Y-m-d',$lastMod[0]['modified'])
+					: date('Y-m-d',$lastMod[0]['created'])
+			 ) : date('Y-m-d');
+		$this->_buffer .= "</lastmod>\n";
+
+		//Set the change frequency according to current data
+		$changeStr = ($lastMod[0]['modified'] > 0)
+			? $this->checkChangeFreq($lastMod[0]['modified'])
+			: $this->checkChangeFreq($lastMod[0]['created']);
+
+		//Write to buffer
+		$this->_buffer .= "\t<changefreq>".$changeStr."</changefreq>\n";
+
+		//Stub engine priority, set default to 0.5
+		$priority = $this->getPriorityLevel($this->_current->id);
+		$priority = (empty($priority[0]))? 0.5 : $priority[0];
+
+		$this->_buffer .= "\t<priority>".$priority."</priority>\n";
 
 		// Recurse through item's children if they exist
 		while ($this->_current->hasChildren()){
-			$this->_buffer .= '<ul>';
+
+			$this->_buffer .= "\t<url>\n";
 			foreach ($this->_current->getChildren() as $child)
 			{
 				$this->_current = & $child;
 				$this->_getLevelXML($depth);
 			}
-			$this->_buffer .= '</ul>';
+			$this->_buffer .= "\t</url>\n";
 		}
 
 		// Finish the item
-		$this->_buffer .= '</li>';
+		$this->_buffer .= "\t</url>\n";
+
 	}
 
 	function _getItemData($item){
@@ -378,7 +620,7 @@ class JSitemapTree extends JTree {
 		if ($item->type == 'menulink'){
 			$menu = &JSite::getMenu();
 			if ($tmp = clone($menu->getItem($item->query['Itemid']))) {
-				$tmp->name	 = '<span><![CDATA['.$item->name.']]></span>';
+				$tmp->name	 = '<![CDATA['.$item->name.']]>';
 				$tmp->mid	 = $item->id;
 				$tmp->parent = $item->parent;
 			} else {
@@ -386,7 +628,7 @@ class JSitemapTree extends JTree {
 			}
 		} else {
 			$tmp = clone($item);
-			$tmp->name = '<span><![CDATA['.$item->name.']]></span>';
+			$tmp->name = '<![CDATA['.$item->name.']]>';
 		}
 
 		$iParams = new JParameter($tmp->params);
@@ -423,25 +665,10 @@ class JSitemapTree extends JTree {
 				$tmp->url = str_replace('&', '&amp;', $tmp->url);
 			}
 
-			switch ($tmp->browserNav){
-				default:
-				case 0:
-					// _top
-					$data = '<a href="'.$tmp->url.'">'.$image.$tmp->name.'</a>';
-					break;
-				case 1:
-					// _blank
-					$data = '<a href="'.$tmp->url.'" target="_blank">'.$image.$tmp->name.'</a>';
-					break;
-				case 2:
-					// window.open
-					$attribs = 'toolbar=no,location=no,status=no,menubar=no,scrollbars=yes,resizable=yes';
+			$data = $tmp->url;
 
-					// hrm...this is a bit dickey
-					$link = str_replace('index.php', 'index2.php', $tmp->url);
-					$data = '<a href="'.$link.'" onclick="window.open(this.href,\'targetWindow\',\''.$attribs.'\');return false;">'.$image.$tmp->name.'</a>';
-					break;
-			}
+			//print_r($tmp);
+
 		} else {
 			$data = '<a>'.$image.$tmp->name.'</a>';
 		}
@@ -457,7 +684,7 @@ class JSitemapTree extends JTree {
  * @package		JM Sitemap
  * @since		1.5
  */
-class JSitemapMenuNode extends JNode{
+class JGooglemapMenuNode extends JNode{
 	/**
 	 * Node Title
 	 */

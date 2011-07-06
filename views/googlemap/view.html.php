@@ -112,10 +112,8 @@ class SitemapViewGooglemap extends JView {
 	 * @return array
 	 */
 	function getMenuList(){
-		$db =& JFactory::getDBO();
-		$query = 'SELECT m.menutype, m.title' .
-				' FROM #__menu_types AS m';
-				//' ORDER BY m.menutype';
+		$db =& JFactory::getDBO();			
+		$query = 'SELECT m.menutype, m.title, jm.ordering FROM #__menu_types AS m, #__jmsitemap_menus as jm where jm.id = m.id and jm.published=1 order by jm.ordering asc';
 		$db->setQuery( $query );
 
 		// load all rows as associative list
