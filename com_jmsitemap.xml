@@ -1,0 +1,83 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!DOCTYPE install SYSTEM "http://dev.joomla.org/xml/1.5/component-install.dtd">
+<install type="component" version="1.5.0">
+	<name>JM Sitemap</name>
+	<creationDate>August 2008</creationDate>
+	<author>Juicy Media Ltd</author>
+	<authorEmail>joomla@juicymedia.co.uk</authorEmail>
+	<authorUrl>http://www.juicymedia.co.uk</authorUrl>
+	<copyright>(C) 2008 All rights reserved.</copyright>
+	<license>GNU/GPL</license>
+	<version>2.1 BETA</version>
+	<description>This simple component shows a basic sitemap on the screen. Provides a Sitemap XML file for use by search engine crawlers.
+	Change Log - Fixed database prefix issue 22/07/2008
+	Change Log - Fixed date and priority issue 07/08/2008
+	</description>
+	<install>
+    	<queries>
+			<query>
+				CREATE TABLE IF NOT EXISTS `#__jmsitemap_google` (
+				  `id` INTEGER(11) NOT NULL,
+				  `priority` FLOAT NOT NULL,
+				  PRIMARY KEY (`id`)
+				) TYPE=MyISAM;
+			</query>
+			<query>
+				CREATE TABLE IF NOT EXISTS `#__jmsitemap_menus` (
+				  `id` INTEGER(10) NOT NULL,
+				  `published` INTEGER(1) NOT NULL DEFAULT '1',
+				  `ordering` INTEGER(10) NOT NULL,
+				  PRIMARY KEY (`id`)
+				) TYPE=MyISAM;
+			</query>
+		</queries>
+  	</install>
+	<uninstall>
+		<queries>
+			<query>
+				DROP TABLE IF EXISTS `#__jmsitemap_google`;
+			</query>
+			<query>
+				DROP TABLE IF EXISTS `#__jmsitemap_menus`;
+			</query>
+		</queries>
+	</uninstall>
+
+	<files>
+		<filename>index.html</filename>
+		<filename>jmsitemap.php</filename>
+		<filename>controller.php</filename>
+		<filename>views/index.html</filename>
+		<filename>views/sitemap/index.html</filename>
+		<filename>views/sitemap/metadata.xml</filename>
+		<filename>views/sitemap/view.html.php</filename>
+		<filename>views/sitemap/tmpl/index.html</filename>
+		<filename>views/sitemap/tmpl/default.php</filename>
+		<filename>views/googlemap/index.html</filename>
+		<filename>views/googlemap/metadata.xml</filename>
+		<filename>views/googlemap/view.html.php</filename>
+	</files>
+
+	<languages>
+		<language tag="en-GB">en-GB.com_jmsitemap.ini</language>
+	</languages>
+
+	<params />
+
+	<administration>
+		<menu img="menu-js/themeoffice/component.png">JM Sitemap</menu>
+		<submenu>
+			<menu link="option=com_jmsitemap">Show/Hide Menus</menu>
+			<menu link="option=com_jmsitemap&amp;task=googlesitemap">Google Sitemap</menu>
+			<menu link="option=com_jmsitemap&amp;task=settings">General Settings</menu>
+		</submenu>
+		<files folder="admin">
+			<filename>index.html</filename>
+			<filename>admin.jmsitemap.html.php</filename>
+			<filename>admin.jmsitemap.php</filename>
+			<filename>toolbar.jmsitemap.html.php</filename>
+			<filename>toolbar.jmsitemap.php</filename>
+		</files>
+	</administration>
+
+</install>
